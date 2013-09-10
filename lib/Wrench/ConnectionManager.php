@@ -78,7 +78,8 @@ class ConnectionManager extends Configurable implements Countable
             'connection_class'        => 'Wrench\Connection',
             'connection_options'      => array(),
             'timeout_select'          => self::TIMEOUT_SELECT,
-            'timeout_select_microsec' => self::TIMEOUT_SELECT_MICROSEC
+            'timeout_select_microsec' => self::TIMEOUT_SELECT_MICROSEC,
+        	'timeout'				  => self::TIMEOUT_SELECT + (self::TIMEOUT_SELECT_MICROSEC / 1000),
         ), $options);
 
         parent::configure($options);
@@ -172,6 +173,29 @@ class ConnectionManager extends Configurable implements Countable
                 $this->processClientSocket($socket);
             }
         }
+
+        foreach ($this->connections as $connection) {
+        	if (!$this->checkLiveSocket($connection)) {
+        		$connection->close();
+        	}
+        }
+    }
+
+    /**
+     * Make sure that the socket can still be considered to be 'alive'
+     *
+     * @return boolean
+     */
+    protected function checkLiveSocket($connection) {
+    	$ret = false;
+
+    	try {
+    		$ret = $connection->getIsAlive($this->options['timeout']);
+    	}
+    	catch (Exception $e) {
+    		$this->server->log('Alive error: ' . $e, 'err');
+    	}
+    	return $ret;
     }
 
     /**

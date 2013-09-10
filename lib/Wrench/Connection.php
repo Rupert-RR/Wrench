@@ -100,6 +100,20 @@ class Connection extends Configurable
     protected $payloadHandler;
 
     /**
+     * Time (in microseconds) after which a ping should be considered timed out
+     *
+     * @var float
+     */
+    protected $pingTimeout = 5;
+
+    /**
+     * Time ping was sent which has not yet received reply
+     *
+     * @var float|null
+     */
+    protected $lastPingTime = null;
+
+    /**
      * Constructor
      *
      * @param Server $server
@@ -114,7 +128,9 @@ class Connection extends Configurable
     ) {
         $this->manager = $manager;
         $this->socket = $socket;
-
+        if (!empty($options['pingTimeout'])) {
+        	$this->pingTimeout = intval($options['pingTimeout']);
+        }
 
         parent::__construct($options);
 
@@ -344,7 +360,17 @@ class Connection extends Configurable
              * frame is not expected.
              */
             case Protocol::TYPE_PONG:
-                $this->log('Received unsolicited pong', 'info');
+            	{
+            		if ($this->lastPingTime !== null) {
+            			// only clear the ping if it has not timed out
+            			if (microtime(true) < $this->lastPingTime + $this->pingTimeout) {
+            				$this->lastPingTime = null;
+            			}
+            		}
+            		else {
+            			$this->log('Received unsolicited pong', 'info');
+            		}
+            	}
             break;
 
             case Protocol::TYPE_CLOSE:
@@ -401,6 +427,35 @@ class Connection extends Configurable
         }
 
         $this->onData($data);
+    }
+
+    /**
+     * Make sure that the connection is still alive
+     */
+    public function getIsAlive($timeout = 5) {
+    	return (!$this->handshaked || ((($this->socket->getLastReceivedTime() + $timeout) > microtime(true)) || $this->ping() || !$this->getIsPingTimedOut()));
+    }
+
+    /**
+     * Sends a ping to the client
+     *
+     * @return boolean whether a ping was sent
+     */
+    public function ping() {
+    	if ($this->lastPingTime === null) {
+    		if ($this->send('hello', Protocol::TYPE_PING)) {
+    			$this->lastPingTime = microtime(true);
+    			return true;
+    		}
+    	}
+    	return false;
+    }
+
+    /**
+     * Clears a ping request (allows us to send another ping request after one has timed out)
+     */
+    public function clearPing() {
+    	$this->lastPingTime = null;
     }
 
     /**
@@ -464,6 +519,15 @@ class Connection extends Configurable
             $this->getId(),
             $message
         ), $priority);
+    }
+
+    /**
+     * Gets whether this connection has a timed-out ping
+     *
+     * @return boolean
+     */
+    public function getIsPingTimedOut() {
+    	return ($this->lastPingTime !== null && microtime(true) > ($this->lastPingTime + $this->pingTimeout));
     }
 
     /**
